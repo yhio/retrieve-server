@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS RootBlocks (
+    root TEXT NOT NULL PRIMARY KEY,
+    size INT NOT NULL,
+    block BLOB NOT NULL
+);

@@ -1,36 +1,80 @@
 package server
 
 import (
-	"database/sql"
+	"encoding/binary"
 
+	"github.com/dgraph-io/badger/v3"
 	logging "github.com/ipfs/go-log/v2"
 )
 
 var log = logging.Logger("server")
 
 type Server struct {
-	db *sql.DB
+	db *badger.DB
+	mc *MinioConfig
 }
 
-func New(db *sql.DB) *Server {
+func New(db *badger.DB) *Server {
+	mc, err := getMinioConfig()
+	if err != nil {
+		log.Fatal("get minio config error: %v", err)
+	}
+
 	return &Server{
 		db: db,
+		mc: mc,
 	}
 }
 
 func (s *Server) upsert(rb *RootBlock) error {
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO RootBlocks(root, size, block) VALUES ($1, $2, $3)`, rb.Root, len(rb.Block), rb.Block)
-	if err != nil {
+	// 将 size 转换为字节数组
+	sizeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(sizeBytes, uint64(len(rb.Block)))
+
+	// 创建事务
+	txn := s.db.NewTransaction(true)
+	defer txn.Discard()
+
+	// 存储 block 数据
+	blockKey := []byte("block:" + rb.Root)
+	if err := txn.Set(blockKey, rb.Block); err != nil {
 		return err
 	}
 
-	log.Debugw("upsertr", "root", rb.Root, "size", len(rb.Block))
+	// 存储 size 数据
+	sizeKey := []byte("size:" + rb.Root)
+	if err := txn.Set(sizeKey, sizeBytes); err != nil {
+		return err
+	}
+
+	// 提交事务
+	if err := txn.Commit(); err != nil {
+		return err
+	}
+
+	log.Debugw("upsert", "root", rb.Root, "size", len(rb.Block))
 	return nil
 }
 
 func (s *Server) delete(root string) error {
-	_, err := s.db.Exec(`DELETE FROM RootBlocks WHERE root=$1`, root)
-	if err != nil {
+	// 创建事务
+	txn := s.db.NewTransaction(true)
+	defer txn.Discard()
+
+	// 删除 block 数据
+	blockKey := []byte("block:" + root)
+	if err := txn.Delete(blockKey); err != nil {
+		return err
+	}
+
+	// 删除 size 数据
+	sizeKey := []byte("size:" + root)
+	if err := txn.Delete(sizeKey); err != nil {
+		return err
+	}
+
+	// 提交事务
+	if err := txn.Commit(); err != nil {
 		return err
 	}
 
@@ -39,8 +83,18 @@ func (s *Server) delete(root string) error {
 }
 
 func (s *Server) block(root string) ([]byte, error) {
-	var block []byte
-	err := s.db.QueryRow(`SELECT block FROM RootBlocks WHERE root=$1`, root).Scan(&block)
+	// 创建只读事务
+	txn := s.db.NewTransaction(false)
+	defer txn.Discard()
+
+	// 获取 block 数据
+	blockKey := []byte("block:" + root)
+	item, err := txn.Get(blockKey)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := item.ValueCopy(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -50,12 +104,23 @@ func (s *Server) block(root string) ([]byte, error) {
 }
 
 func (s *Server) size(root string) (int, error) {
-	var size int
-	err := s.db.QueryRow(`SELECT size FROM RootBlocks WHERE root=$1`, root).Scan(&size)
+	// 创建只读事务
+	txn := s.db.NewTransaction(false)
+	defer txn.Discard()
+
+	// 获取 size 数据
+	sizeKey := []byte("size:" + root)
+	item, err := txn.Get(sizeKey)
 	if err != nil {
 		return 0, err
 	}
 
+	sizeBytes, err := item.ValueCopy(nil)
+	if err != nil {
+		return 0, err
+	}
+
+	size := int(binary.BigEndian.Uint64(sizeBytes))
 	log.Debugw("getsize", "root", root, "size", size)
 	return size, nil
 }

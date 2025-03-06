@@ -24,6 +24,7 @@ func (s *Server) Handle() {
 	http.HandleFunc("GET /block/{root}", middleware.Timer(s.blockHandle, "block"))
 	http.HandleFunc("GET /size/{root}", middleware.Timer(s.sizeHandle, "size"))
 	http.HandleFunc("DELETE /block/{root}", middleware.Timer(s.deleteHandle, "delete"))
+	http.HandleFunc("GET /car", middleware.Timer(s.Fetch, "fetch"))
 }
 
 func (s *Server) upsertHandle(w http.ResponseWriter, r *http.Request) {

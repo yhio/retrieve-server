@@ -5,6 +5,7 @@ import (
 
 	"github.com/gh-efforts/retrieve-server/client"
 	"github.com/ipfs/go-cid"
+	car "github.com/ipld/go-car/v2"
 	"github.com/ipld/go-car/v2/blockstore"
 	"github.com/urfave/cli/v2"
 )
@@ -24,7 +25,7 @@ var postCmd = &cli.Command{
 			return fmt.Errorf("args < 2")
 		}
 
-		bs, err := blockstore.OpenReadOnly(cctx.Args().Get(0))
+		bs, err := blockstore.OpenReadOnly(cctx.Args().Get(0), car.ZeroLengthSectionAsEOF(true))
 		if err != nil {
 			return err
 		}

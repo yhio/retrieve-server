@@ -28,6 +28,7 @@ func main() {
 	local := []*cli.Command{
 		runCmd,
 		postCmd,
+		carCmd,
 		pprofCmd,
 	}
 

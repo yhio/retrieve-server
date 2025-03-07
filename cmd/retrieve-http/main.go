@@ -1,7 +1,6 @@
 package main
 
 import (
-	"compress/gzip"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -10,11 +9,8 @@ import (
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/gh-efforts/retrieve-server/build"
-	"github.com/gh-efforts/retrieve-server/client"
 	"github.com/gh-efforts/retrieve-server/metrics"
-	"github.com/ipld/frisbii"
 
-	"github.com/filecoin-project/boost-graphsync/storeutil"
 	bdclient "github.com/filecoin-project/boost/extern/boostd-data/client"
 	cliutil "github.com/filecoin-project/lotus/cli/util"
 	logging "github.com/ipfs/go-log/v2"
@@ -54,10 +50,6 @@ var runCmd = &cli.Command{
 			Name:  "debug",
 			Value: false,
 		},
-		&cli.StringFlag{
-			Name:  "server-addr",
-			Value: "127.0.0.1:9876",
-		},
 		&cli.Float64Flag{
 			Name:  "reject-rate",
 			Value: 0.0,
@@ -71,7 +63,7 @@ var runCmd = &cli.Command{
 		},
 		&cli.StringFlag{
 			Name:     "api-lid",
-			Usage:    "the endpoint for the local index directory API, eg 'http://localhost:8042'",
+			Usage:    "the endpoint for the local index directory API, eg 'ws://localhost:8042'",
 			Required: true,
 		},
 	},
@@ -133,16 +125,12 @@ var runCmd = &cli.Command{
 			return fmt.Errorf("connecting to local index directory service: %w", err)
 		}
 
-		lsys := storeutil.LinkSystemForBlockstore(client.New(cctx.String("server-addr")))
 		http.Handle(
 			"/ipfs/",
 			logHandler(
-				carHandler(
-					randomRejectHandler(
-						frisbii.NewHttpIpfs(ctx, lsys, frisbii.WithCompressionLevel(gzip.NoCompression)),
-						rejectRate,
-					),
-					cl,
+				randomRejectHandler(
+					carHandler(cl),
+					rejectRate,
 				),
 			),
 		)
@@ -197,25 +185,12 @@ func randomRejectHandler(next http.Handler, rejectRate float64) http.Handler {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		log.Debugw("retrieve server",
-			"path", r.URL.Path,
-			"method", r.Method,
-		)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func carHandler(next http.Handler, store *bdclient.Store) http.Handler {
+func carHandler(store *bdclient.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		dagScope := r.URL.Query().Get("dag-scope")
-		if dagScope == "all" || dagScope == "" {
-			log.Debugw("car handler",
-				"path", r.URL.Path,
-				"method", r.Method,
-			)
-			car(w, r, store)
-			return
-		}
-		next.ServeHTTP(w, r)
+		car(w, r, store)
 	})
 }

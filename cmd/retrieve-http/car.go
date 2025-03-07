@@ -85,7 +85,7 @@ func getCarInfo(ctx context.Context, blockCid cid.Cid, store *bdclient.Store) (C
 	}
 
 	for _, pieceCid := range pieceCids {
-		if value, ok := carInfoMap.Load(pieceCid); ok {
+		if value, ok := carInfoMap.Load(pieceCid.String()); ok {
 			return value.(CarInfo), nil
 		}
 	}

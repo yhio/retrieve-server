@@ -14,6 +14,7 @@ import (
 
 	"github.com/filecoin-project/boost-graphsync/storeutil"
 	bdclient "github.com/filecoin-project/boost/extern/boostd-data/client"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/frisbii"
 	carv2 "github.com/ipld/go-car/v2"
@@ -31,7 +32,17 @@ type CarInfo struct {
 
 var (
 	carInfoMap sync.Map
+	indexCache *lru.Cache[string, carindex.IterableIndex]
 )
+
+func init() {
+	// 初始化LRU缓存，设置容量为1000
+	var err error
+	indexCache, err = lru.New[string, carindex.IterableIndex](1000)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create index cache: %v", err))
+	}
+}
 
 func loadCarInfo(dirPath string) error {
 	carInfoMap.Range(func(key, value interface{}) bool {
@@ -128,6 +139,14 @@ func car(w http.ResponseWriter, r *http.Request, store *bdclient.Store) {
 }
 
 func getIterableIndex(ctx context.Context, store *bdclient.Store, pieceCid cid.Cid) (carindex.IterableIndex, error) {
+	// 先从LRU缓存中查找
+	key := pieceCid.String()
+	if idx, ok := indexCache.Get(key); ok {
+		log.Debugw("get index from cache", "pieceCid", pieceCid)
+		return idx, nil
+	}
+
+	// 如果缓存中没有，则从store中获取
 	idx, err := store.GetIndex(ctx, pieceCid)
 	if err != nil {
 		return nil, err
@@ -135,6 +154,8 @@ func getIterableIndex(ctx context.Context, store *bdclient.Store, pieceCid cid.C
 
 	switch concrete := idx.(type) {
 	case carindex.IterableIndex:
+		// 存入LRU缓存
+		indexCache.Add(key, concrete)
 		return concrete, nil
 	default:
 		return nil, fmt.Errorf("expected index to be MultihashIndexSorted but got %T", idx)
